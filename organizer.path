@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch Downloads for new files
+
+[Path]
+PathModified=%h/Downloads
+Unit=organizer.service
+
+[Install]
+WantedBy=default.target
