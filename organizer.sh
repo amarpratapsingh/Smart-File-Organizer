@@ -15,6 +15,8 @@ organize_file()
 
     [ -f "$file" ] || return
 
+    fuser -s "$file" 2>/dev/null && return
+
     filename="$(basename "$file")"
     dirname="$(dirname "$file")"
     basename="${filename%.*}"
