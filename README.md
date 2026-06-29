@@ -1,10 +1,8 @@
 # Smart File Organizer
 
-Automatically sorts files from `~/Downloads` into categorized folders by extension. Runs as a systemd service for real-time sorting, or standalone for one-off scans.
-
-## How it works
-
-Systemd watches `~/Downloads` via `organizer.path`. When a new file lands, it triggers `organizer.service` which runs `organizer.sh` to sort it.
+Automatically sorts files from `~/Downloads` into categorized folders by extension.
+- **Linux**: systemd path watcher triggers `organizer.sh`
+- **Windows**: PowerShell `FileSystemWatcher` via `organizer.ps1`
 
 ## Sorted structure
 
@@ -30,16 +28,17 @@ Systemd watches `~/Downloads` via `organizer.path`. When a new file lands, it tr
 
 Code files (`.py`, `.js`, `.ts`, `.html`, `.css`, etc.) are left untouched in Downloads for manual handling.
 
-## Usage
+## Linux
+
+### Usage
 
 ```bash
-# Standalone — sort a directory once
-./organizer.sh
-./organizer.sh --source ~/Desktop
-./organizer.sh --dry-run    # preview without moving
+./organizer.sh                    # scan ~/Downloads
+./organizer.sh --source ~/Desktop # scan another directory
+./organizer.sh --dry-run          # preview without moving
 ```
 
-## Service management
+### Service management
 
 ```bash
 # Enable (auto-start on login)
@@ -58,9 +57,9 @@ systemctl --user stop organizer.path
 systemctl --user disable organizer.path
 ```
 
-## Setup
+### Setup
 
-The service files are already symlinked to `~/.config/systemd/user/`. If you move the project, re-link:
+Service files are symlinked to `~/.config/systemd/user/`. If you move the project, re-link:
 
 ```bash
 ln -sf /path/to/organizer.service ~/.config/systemd/user/
@@ -68,10 +67,54 @@ ln -sf /path/to/organizer.path ~/.config/systemd/user/
 systemctl --user daemon-reload
 ```
 
+### Loop protection
+
+The script uses **`flock`** and a **5-second cooldown** to prevent rapid re-triggers when moved files modify Downloads. The systemd unit has `StartLimitIntervalSec=30` / `StartLimitBurst=10`, and the path unit uses `PathChanged` (not `PathModified`) to ignore attribute-only events.
+
+---
+
+## Windows
+
+### Usage
+
+```powershell
+.\organizer.ps1                    # scan ~\Downloads
+.\organizer.ps1 -Source ~\Desktop  # scan another directory
+.\organizer.ps1 -DryRun            # preview without moving
+.\organizer.ps1 -Watch             # persistent FileSystemWatcher
+```
+
+### Auto-start on login (Task Scheduler)
+
+```powershell
+$action = New-ScheduledTaskAction -Execute "powershell.exe" `
+    -Argument "-WindowStyle Hidden -File `"$HOME\Smart File Org\organizer.ps1`" -Watch"
+$trigger = New-ScheduledTaskTrigger -AtLogOn
+Register-ScheduledTask -TaskName "SmartFileOrganizer" -Action $action -Trigger $trigger
+```
+
+### Loop protection
+
+Uses a **named `System.Threading.Mutex`** and a **5-second cooldown** file to prevent overlapping and rapid re-triggers.
+
+---
+
+## Testing (GitHub Actions)
+
+Push changes to `organizer.ps1` and the workflow in `.github/workflows/test-organizer.yml` runs on `windows-latest`, testing:
+- All 16+ file types route to correct folders
+- Code files are excluded
+- Name-collision dedup
+- Concurrent-run lock
+- In-use file skipping
+- Image sub-categorization (Screenshot / Named / Unnamed)
+
 ## Files
 
-| File | Purpose |
-|---|---|
-| `organizer.sh` | Sorting logic |
-| `organizer.service` | Systemd unit that runs the script |
-| `organizer.path` | Systemd path watcher for `~/Downloads` |
+| File | Platform | Purpose |
+|---|---|---|
+| `organizer.sh` | Linux | Sorting script |
+| `organizer.service` | Linux | Systemd unit |
+| `organizer.path` | Linux | Systemd path watcher |
+| `organizer.ps1` | Windows | Sorting script with `FileSystemWatcher` |
+| `.github/workflows/test-organizer.yml` | CI | Windows tests on push |
