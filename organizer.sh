@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+LOCK_FILE="/tmp/organizer.lock"
+COOLDOWN_FILE="/tmp/organizer.cooldown"
+COOLDOWN_SECS=5
+
+exec 200>"$LOCK_FILE"
+flock -n 200 || exit 0
+
+read -r last < "$COOLDOWN_FILE" 2>/dev/null || last=0
+now=$(date +%s)
+if [ $((now - last)) -lt "$COOLDOWN_SECS" ]; then
+    exit 0
+fi
+echo "$now" > "$COOLDOWN_FILE"
+
 WATCH_DIR="$HOME/Downloads"
 DRY_RUN=false
 CODE_EXTS=(

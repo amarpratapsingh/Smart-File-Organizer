@@ -4,3 +4,5 @@ Description=Smart File Organizer
 [Service]
 Type=oneshot
 ExecStart="/home/amar/Documents/Projects/Smart File Org/organizer.sh"
+StartLimitIntervalSec=30
+StartLimitBurst=10

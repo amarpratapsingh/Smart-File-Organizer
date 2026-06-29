@@ -2,7 +2,7 @@
 Description=Watch Downloads for new files
 
 [Path]
-PathModified=%h/Downloads
+PathChanged=%h/Downloads
 Unit=organizer.service
 
 [Install]
