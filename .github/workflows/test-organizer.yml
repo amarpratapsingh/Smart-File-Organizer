@@ -1,0 +1,123 @@
+name: Test Windows Organizer
+
+on:
+  push:
+    paths:
+      - 'organizer.ps1'
+  pull_request:
+    paths:
+      - 'organizer.ps1'
+
+jobs:
+  test:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dry-run (all categories)
+        shell: pwsh
+        run: |
+          $dir = "$env:TEMP\test_dry"
+          New-Item -Type Directory -Force $dir
+          @(
+            'doc.pdf', 'notes.txt', 'readme.md', 'report.docx',
+            'slide.ppt', 'deck.pptx', 'data.xls', 'table.xlsx',
+            'archive.zip', 'package.tar', 'song.mp3', 'video.mp4',
+            'image.gif', 'vector.svg', 'screenshot_day.png',
+            'D6B1A4E9F2C8D0E3F7A1B5C9E2F4D6A8B0C3E5F7A9B1D4F6E8C0A2B5D7F9E1',
+            'photo.jpg'
+          ) | ForEach-Object { New-Item "$dir\$_" -Type File }
+          New-Item "$dir\script.py" -Type File
+          New-Item "$dir\app.ts" -Type File
+
+          $output = .\organizer.ps1 -DryRun -Source $dir 2>&1
+          $exit = $LASTEXITCODE
+          Write-Output $output
+
+          if ($exit -ne 0) { throw "Exit code: $exit" }
+
+          $expect = @(
+            'PDFs\doc.pdf', 'TXTs\notes.txt', 'MDs\readme.md', 'DOCX\report.docx',
+            'PPTs\slide.ppt', 'PPTs\deck.pptx', 'XL\data.xls', 'XL\table.xlsx',
+            'Zipped\archive.zip', 'Zipped\package.tar', 'Music\song.mp3',
+            'Videos\video.mp4', 'Pictures\image.gif', 'Pictures\vector.svg',
+            'Screenshots\screenshot_day.png', 'Unnamed\D6B1A4E9F2C8D0E3F7A1B5C9E2F4D6A8B0C3E5F7A9B1D4F6E8C0A2B5D7F9E1.png',
+            'Named\photo.jpg'
+          )
+          foreach ($e in $expect) {
+            if ($output -notmatch [regex]::Escape($e)) {
+              Write-Warning "Missing: $e"
+            }
+          }
+
+          if ($output -match '(Moved|DRY-RUN).*script\.py' -or $output -match '(Moved|DRY-RUN).*app\.ts') {
+            throw "Code files should not be moved"
+          }
+
+      - name: Real move
+        shell: pwsh
+        run: |
+          $dir = "$env:TEMP\test_move"
+          New-Item -Type Directory -Force $dir
+          New-Item "$dir\report.docx" -Type File
+          .\organizer.ps1 -Source $dir
+          if (-not (Test-Path "$HOME\Documents\DOCX\report.docx")) {
+            throw "report.docx not moved to DOCX"
+          }
+
+      - name: Dedup on name collision
+        shell: pwsh
+        run: |
+          $dir = "$env:TEMP\test_dedup"
+          New-Item -Type Directory -Force $dir
+          New-Item "$dir\file.txt" -Type File
+          .\organizer.ps1 -Source $dir
+          Start-Sleep 1
+          New-Item "$dir\file.txt" -Type File
+          .\organizer.ps1 -Source $dir
+          $files = Get-ChildItem "$HOME\Documents\TXTs\"
+          if ($files.Count -lt 2) {
+            throw "Expected 2 files in TXTs, got $($files.Count)"
+          }
+
+      - name: Concurrent run is blocked
+        shell: pwsh
+        run: |
+          $dir = "$env:TEMP\test_lock"
+          New-Item -Type Directory -Force $dir
+          $job = Start-Job -ScriptBlock { param($s) Start-Sleep 2 } -ArgumentList $dir
+          Start-Sleep 0.5
+          $output = .\organizer.ps1 -DryRun -Source $dir 2>&1
+          $job | Remove-Job -Force
+          if ($LASTEXITCODE -ne 0) {
+            throw "Second instance should exit 0, got $LASTEXITCODE"
+          }
+
+      - name: File locked by another process is skipped
+        shell: pwsh
+        run: |
+          $dir = "$env:TEMP\test_locked"
+          New-Item -Type Directory -Force $dir
+          $file = "$dir\locked.txt"
+          New-Item $file -Type File
+          $stream = [System.IO.File]::Open($file, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+          try {
+            $output = .\organizer.ps1 -DryRun -Source $dir 2>&1
+            if ($output -match 'locked') { throw "Locked file was processed" }
+          } finally {
+            $stream.Close()
+          }
+
+      - name: Name-based image categorization
+        shell: pwsh
+        run: |
+          $dir = "$env:TEMP\test_img"
+          New-Item -Type Directory -Force $dir
+          New-Item "$dir\Screenshot 2026-01-01.png" -Type File
+          New-Item "$dir\my_photo.jpg" -Type File
+          New-Item "$dir\A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0C1D2E3F4A5B6C7D8E9F0A1B2C3D4.jpg" -Type File
+          $output = .\organizer.ps1 -DryRun -Source $dir 2>&1
+          if ($output -notmatch 'Screenshots.*screenshot') { Write-Warning "Screenshot not detected" }
+          if ($output -notmatch 'Named.*my_photo') { Write-Warning "Named photo not detected" }
+          if ($output -notmatch 'Unnamed.*A1B2C3D4') { Write-Warning "Unnamed image not detected" }
