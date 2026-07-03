@@ -1,19 +1,13 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
 
 LOCK_FILE="/tmp/organizer.lock"
-COOLDOWN_FILE="/tmp/organizer.cooldown"
-COOLDOWN_SECS=5
+STABLE_AGE=15
+MAX_WAIT=120
+WAIT_INTERVAL=3
 
 exec 200>"$LOCK_FILE"
 flock -n 200 || exit 0
-
-read -r last < "$COOLDOWN_FILE" 2>/dev/null || last=0
-now=$(date +%s)
-if [ $((now - last)) -lt "$COOLDOWN_SECS" ]; then
-    exit 0
-fi
-echo "$now" > "$COOLDOWN_FILE"
 
 WATCH_DIR="$HOME/Downloads"
 DRY_RUN=false
@@ -22,17 +16,41 @@ CODE_EXTS=(
     rs go rb sh bash zsh java kt swift php pl pm lua r
     sql json yaml yml toml xml ps1 bat)
 
+wait_stable()
+{
+    local file="$1"
+    local waited=0
+
+    while [ $waited -lt $MAX_WAIT ]; do
+        [ -f "$file" ] || return 1
+
+        fuser -s "$file" 2>/dev/null && { sleep $WAIT_INTERVAL; waited=$((waited + WAIT_INTERVAL)); continue; }
+
+        local mtime now age
+        mtime=$(stat -c %Y "$file" 2>/dev/null) || return 1
+        now=$(date +%s)
+        age=$((now - mtime))
+
+        if [ $age -ge $STABLE_AGE ]; then
+            return 0
+        fi
+
+        sleep $WAIT_INTERVAL
+        waited=$((waited + WAIT_INTERVAL))
+    done
+
+    echo "Warning: $file not stable after ${MAX_WAIT}s, skipping" >&2
+    return 1
+}
+
 organize_file()
 {
     local file="$1"
-    local filename dirname basename ext ext_lower
+    local filename basename ext ext_lower dest target
 
-    [ -f "$file" ] || return
-
-    fuser -s "$file" 2>/dev/null && return
+    wait_stable "$file" || return
 
     filename="$(basename "$file")"
-    dirname="$(dirname "$file")"
     basename="${filename%.*}"
     ext="${filename##*.}"
 
@@ -45,7 +63,7 @@ organize_file()
         fi
     done
 
-    local dest=""
+    dest=""
 
     case "$ext_lower" in
         jpg|jpeg|png|webp)
@@ -78,9 +96,9 @@ organize_file()
         esac
     fi
 
-    [ -d "$dest" ] || mkdir -p "$dest"
+    [ -d "$dest" ] || mkdir -p "$dest" || { echo "Failed to create $dest" >&2; return; }
 
-    local target="$dest/$filename"
+    target="$dest/$filename"
     if [ -f "$target" ]; then
         local name_no_ext="${filename%.*}"
         local timestamp
@@ -91,7 +109,7 @@ organize_file()
     if [ "$DRY_RUN" = true ]; then
         echo "[DRY-RUN] $file -> $dest/"
     else
-        mv "$file" "$target"
+        mv "$file" "$target" || { echo "Failed to move $file -> $target" >&2; return; }
         echo "Moved: $file -> $target"
     fi
 }
