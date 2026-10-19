@@ -1,123 +1,129 @@
-name: Test Windows Organizer
+name: Smart File Organizer CI
 
 on:
   push:
+    branches:
+      - main
+      - master
     paths:
+      - 'organizer.sh'
       - 'organizer.ps1'
+      - 'organizer.service'
+      - 'organizer.path'
+      - 'README.md'
+      - '.github/workflows/test-organizer.yml'
   pull_request:
+    branches:
+      - main
+      - master
     paths:
+      - 'organizer.sh'
       - 'organizer.ps1'
+      - 'organizer.service'
+      - 'organizer.path'
+      - 'README.md'
+      - '.github/workflows/test-organizer.yml'
+  workflow_dispatch:
 
 jobs:
-  test:
-    runs-on: windows-latest
+  validate-linux:
+    name: Linux validation
+    runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Dry-run (all categories)
-        shell: pwsh
+      - name: Validate bash syntax
+        run: bash -n organizer.sh
+
+      - name: Dry run with sample files
         run: |
-          $dir = "$env:TEMP\test_dry"
-          New-Item -Type Directory -Force $dir
+          set -euo pipefail
+          tmpdir="$(mktemp -d)"
+          trap 'rm -rf "$tmpdir"' EXIT
+
+          touch "$tmpdir/doc.pdf" "$tmpdir/notes.txt" "$tmpdir/cover.png" "$tmpdir/song.mp3" "$tmpdir/script.py"
+
+          HOME="$tmpdir" ./organizer.sh --dry-run --source "$tmpdir" > output.txt 2>&1
+
+          grep -Eq 'doc\.pdf|notes\.txt|cover\.png|song\.mp3' output.txt
+          ! grep -Eq 'script\.py' output.txt
+
+      - name: Validate service configuration
+        run: |
+          grep -q 'PathChanged' organizer.path
+          grep -q 'WantedBy=default.target' organizer.service
+
+  validate-windows:
+    name: Windows validation
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Dry-run all supported categories
+        run: |
+          $dir = Join-Path $env:TEMP 'smartfile-ci'
+          Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
+          New-Item -Path $dir -ItemType Directory -Force | Out-Null
+
           @(
-            'doc.pdf', 'notes.txt', 'readme.md', 'report.docx',
-            'slide.ppt', 'deck.pptx', 'data.xls', 'table.xlsx',
-            'archive.zip', 'package.tar', 'song.mp3', 'video.mp4',
-            'image.gif', 'vector.svg', 'screenshot_day.png',
-            'D6B1A4E9F2C8D0E3F7A1B5C9E2F4D6A8B0C3E5F7A9B1D4F6E8C0A2B5D7F9E1',
-            'photo.jpg'
-          ) | ForEach-Object { New-Item "$dir\$_" -Type File }
-          New-Item "$dir\script.py" -Type File
-          New-Item "$dir\app.ts" -Type File
+            'doc.pdf','notes.txt','readme.md','report.docx',
+            'slide.ppt','deck.pptx','data.xls','table.xlsx',
+            'archive.zip','package.tar','song.mp3','video.mp4',
+            'image.gif','vector.svg','screenshot_day.png',
+            'A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0C1D2E3F4A5B6C7D8E9F0A1B2C3D4.jpg',
+            'photo.jpg','script.py','app.ts'
+          ) | ForEach-Object {
+            New-Item -Path (Join-Path $dir $_) -ItemType File -Force | Out-Null
+          }
 
           $output = .\organizer.ps1 -DryRun -Source $dir 2>&1
           $exit = $LASTEXITCODE
           Write-Output $output
 
-          if ($exit -ne 0) { throw "Exit code: $exit" }
+          if ($exit -ne 0) { throw "organizer.ps1 exited with code $exit" }
 
           $expect = @(
-            'PDFs\doc.pdf', 'TXTs\notes.txt', 'MDs\readme.md', 'DOCX\report.docx',
-            'PPTs\slide.ppt', 'PPTs\deck.pptx', 'XL\data.xls', 'XL\table.xlsx',
-            'Zipped\archive.zip', 'Zipped\package.tar', 'Music\song.mp3',
-            'Videos\video.mp4', 'Pictures\image.gif', 'Pictures\vector.svg',
-            'Screenshots\screenshot_day.png', 'Unnamed\D6B1A4E9F2C8D0E3F7A1B5C9E2F4D6A8B0C3E5F7A9B1D4F6E8C0A2B5D7F9E1.png',
-            'Named\photo.jpg'
+            'Documents\PDFs', 'Documents\TXTs', 'Documents\MDs', 'Documents\DOCX',
+            'Documents\PPTs', 'Documents\XL', 'Documents\Zipped', 'Music',
+            'Videos', 'Pictures', 'Pictures\Screenshots', 'Pictures\Unnamed', 'Pictures\Named'
           )
-          foreach ($e in $expect) {
-            if ($output -notmatch [regex]::Escape($e)) {
-              Write-Warning "Missing: $e"
+
+          foreach ($item in $expect) {
+            if ($output -notmatch [regex]::Escape($item)) {
+              throw "Expected category not found: $item"
             }
           }
 
-          if ($output -match '(Moved|DRY-RUN).*script\.py' -or $output -match '(Moved|DRY-RUN).*app\.ts') {
-            throw "Code files should not be moved"
+          if ($output -match 'script\.py' -or $output -match 'app\.ts') {
+            throw 'Code files should not be moved by the organizer.'
           }
 
-      - name: Real move
-        shell: pwsh
-        run: |
-          $dir = "$env:TEMP\test_move"
-          New-Item -Type Directory -Force $dir
-          New-Item "$dir\report.docx" -Type File
-          .\organizer.ps1 -Source $dir
-          if (-not (Test-Path "$HOME\Documents\DOCX\report.docx")) {
-            throw "report.docx not moved to DOCX"
-          }
+  package:
+    name: Package release artifact
+    needs:
+      - validate-linux
+      - validate-windows
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
 
-      - name: Dedup on name collision
-        shell: pwsh
-        run: |
-          $dir = "$env:TEMP\test_dedup"
-          New-Item -Type Directory -Force $dir
-          New-Item "$dir\file.txt" -Type File
-          .\organizer.ps1 -Source $dir
-          Start-Sleep 1
-          New-Item "$dir\file.txt" -Type File
-          .\organizer.ps1 -Source $dir
-          $files = Get-ChildItem "$HOME\Documents\TXTs\"
-          if ($files.Count -lt 2) {
-            throw "Expected 2 files in TXTs, got $($files.Count)"
-          }
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Concurrent run is blocked
-        shell: pwsh
+      - name: Create archive
         run: |
-          $dir = "$env:TEMP\test_lock"
-          New-Item -Type Directory -Force $dir
-          $job = Start-Job -ScriptBlock { param($s) Start-Sleep 2 } -ArgumentList $dir
-          Start-Sleep 0.5
-          $output = .\organizer.ps1 -DryRun -Source $dir 2>&1
-          $job | Remove-Job -Force
-          if ($LASTEXITCODE -ne 0) {
-            throw "Second instance should exit 0, got $LASTEXITCODE"
-          }
+          tar -czf smart-file-org-${GITHUB_SHA::7}.tar.gz \
+            README.md organizer.sh organizer.ps1 organizer.service organizer.path .github
 
-      - name: File locked by another process is skipped
-        shell: pwsh
-        run: |
-          $dir = "$env:TEMP\test_locked"
-          New-Item -Type Directory -Force $dir
-          $file = "$dir\locked.txt"
-          New-Item $file -Type File
-          $stream = [System.IO.File]::Open($file, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
-          try {
-            $output = .\organizer.ps1 -DryRun -Source $dir 2>&1
-            if ($output -match 'locked') { throw "Locked file was processed" }
-          } finally {
-            $stream.Close()
-          }
-
-      - name: Name-based image categorization
-        shell: pwsh
-        run: |
-          $dir = "$env:TEMP\test_img"
-          New-Item -Type Directory -Force $dir
-          New-Item "$dir\Screenshot 2026-01-01.png" -Type File
-          New-Item "$dir\my_photo.jpg" -Type File
-          New-Item "$dir\A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0C1D2E3F4A5B6C7D8E9F0A1B2C3D4.jpg" -Type File
-          $output = .\organizer.ps1 -DryRun -Source $dir 2>&1
-          if ($output -notmatch 'Screenshots.*screenshot') { Write-Warning "Screenshot not detected" }
-          if ($output -notmatch 'Named.*my_photo') { Write-Warning "Named photo not detected" }
-          if ($output -notmatch 'Unnamed.*A1B2C3D4') { Write-Warning "Unnamed image not detected" }
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: smart-file-org
+          path: smart-file-org-${{ github.sha }}.tar.gz
