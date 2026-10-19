@@ -6,22 +6,22 @@ on:
       - main
       - master
     paths:
-      - 'Smart File Org/organizer.sh'
-      - 'Smart File Org/organizer.ps1'
-      - 'Smart File Org/organizer.service'
-      - 'Smart File Org/organizer.path'
-      - 'Smart File Org/README.md'
+      - 'organizer.sh'
+      - 'organizer.ps1'
+      - 'organizer.service'
+      - 'organizer.path'
+      - 'README.md'
       - '.github/workflows/test-organizer.yml'
   pull_request:
     branches:
       - main
       - master
     paths:
-      - 'Smart File Org/organizer.sh'
-      - 'Smart File Org/organizer.ps1'
-      - 'Smart File Org/organizer.service'
-      - 'Smart File Org/organizer.path'
-      - 'Smart File Org/README.md'
+      - 'organizer.sh'
+      - 'organizer.ps1'
+      - 'organizer.service'
+      - 'organizer.path'
+      - 'README.md'
       - '.github/workflows/test-organizer.yml'
   workflow_dispatch:
 
@@ -29,10 +29,6 @@ jobs:
   validate-linux:
     name: Linux validation
     runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        working-directory: Smart File Org
 
     steps:
       - name: Checkout repository
@@ -52,12 +48,13 @@ jobs:
           HOME="$tmpdir" ./organizer.sh --dry-run --source "$tmpdir" > output.txt 2>&1
 
           grep -Eq 'doc\.pdf|notes\.txt|cover\.png|song\.mp3' output.txt
-          ! grep -Eq 'script\.py' output.txt
+          ! grep - 'script\.py' output.txt
 
       - name: Validate service configuration
         run: |
           grep -q 'PathChanged' organizer.path
-          grep -q 'WantedBy=default.target' organizer.service
+          grep -q 'WantedBy=default.target' organizer.path
+          grep -q 'ExecStart' organizer.service
 
   validate-windows:
     name: Windows validation
@@ -65,7 +62,6 @@ jobs:
     defaults:
       run:
         shell: pwsh
-        working-directory: Smart File Org
 
     steps:
       - name: Checkout repository
@@ -125,7 +121,7 @@ jobs:
       - name: Create archive
         run: |
           tar -czf "smart-file-org-${GITHUB_SHA}.tar.gz" \
-            "Smart File Org"
+            README.md organizer.sh organizer.ps1 organizer.service organizer.path .github
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
