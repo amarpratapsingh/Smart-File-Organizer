@@ -6,22 +6,22 @@ on:
       - main
       - master
     paths:
-      - 'organizer.sh'
-      - 'organizer.ps1'
-      - 'organizer.service'
-      - 'organizer.path'
-      - 'README.md'
+      - 'Smart File Org/organizer.sh'
+      - 'Smart File Org/organizer.ps1'
+      - 'Smart File Org/organizer.service'
+      - 'Smart File Org/organizer.path'
+      - 'Smart File Org/README.md'
       - '.github/workflows/test-organizer.yml'
   pull_request:
     branches:
       - main
       - master
     paths:
-      - 'organizer.sh'
-      - 'organizer.ps1'
-      - 'organizer.service'
-      - 'organizer.path'
-      - 'README.md'
+      - 'Smart File Org/organizer.sh'
+      - 'Smart File Org/organizer.ps1'
+      - 'Smart File Org/organizer.service'
+      - 'Smart File Org/organizer.path'
+      - 'Smart File Org/README.md'
       - '.github/workflows/test-organizer.yml'
   workflow_dispatch:
 
@@ -29,6 +29,10 @@ jobs:
   validate-linux:
     name: Linux validation
     runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: Smart File Org
 
     steps:
       - name: Checkout repository
@@ -61,6 +65,7 @@ jobs:
     defaults:
       run:
         shell: pwsh
+        working-directory: Smart File Org
 
     steps:
       - name: Checkout repository
@@ -119,8 +124,8 @@ jobs:
 
       - name: Create archive
         run: |
-          tar -czf smart-file-org-${GITHUB_SHA::7}.tar.gz \
-            README.md organizer.sh organizer.ps1 organizer.service organizer.path .github
+          tar -czf "smart-file-org-${GITHUB_SHA}.tar.gz" \
+            "Smart File Org"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
